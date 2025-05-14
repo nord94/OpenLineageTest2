@@ -1,0 +1,123 @@
+services:
+  postgres:
+    image: postgres:17.2
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+    restart: always
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+    ports:
+      - "5435:5435"
+
+  postgres-dwh:
+    image: postgres:17.2
+    environment:
+      POSTGRES_USER: dwh_user
+      POSTGRES_PASSWORD: dwh_password
+      POSTGRES_DB: dwh
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "dwh_user"]
+      interval: 5s
+      retries: 5
+    restart: always
+    volumes:
+      - postgres-dwh-volume:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+
+  redis:
+    image: redis:latest
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 30s
+      retries: 50
+    restart: always
+    ports:
+      - "6379:6379"
+
+  airflow-webserver:
+    image: apache/airflow:2.10.5
+    depends_on:
+      - postgres
+      - redis
+    env_file:
+      - ./config/airflow.env
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./config:/opt/airflow/config
+      - ./data:/opt/airflow/data
+      - ./requirements.txt:/opt/airflow/requirements.txt
+    ports:
+      - "8080:8080"
+    command: >
+      bash -c "pip install -r requirements.txt && airflow webserver"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    restart: always
+
+  airflow-scheduler:
+    image: apache/airflow:2.10.5
+    depends_on:
+      - airflow-webserver
+    env_file:
+      - ./config/airflow.env
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./config:/opt/airflow/config
+      - ./data:/opt/airflow/data
+      - ./requirements.txt:/opt/airflow/requirements.txt
+    command: >
+      bash -c "pip install -r requirements.txt && airflow scheduler"
+    restart: always
+
+  airflow-worker:
+    image: apache/airflow:2.10.5
+    depends_on:
+      - airflow-scheduler
+    env_file:
+      - ./config/airflow.env
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./config:/opt/airflow/config
+      - ./data:/opt/airflow/data
+      - ./requirements.txt:/opt/airflow/requirements.txt
+    command: >
+      bash -c "pip install -r requirements.txt && airflow celery worker"
+    restart: always
+
+  airflow-init:
+    image: apache/airflow:2.10.5
+    depends_on:
+      - postgres
+    env_file:
+      - ./config/airflow.env
+    environment:
+      - _AIRFLOW_DB_UPGRADE=true
+      - _AIRFLOW_WWW_USER_CREATE=true
+      - _AIRFLOW_WWW_USER_USERNAME=airflow
+      - _AIRFLOW_WWW_USER_PASSWORD=airflow
+    volumes:
+      - ./requirements.txt:/opt/airflow/requirements.txt
+    command: >
+      bash -c "pip install -r requirements.txt && airflow version"
+    restart: always
+
+volumes:
+  postgres-db-volume:
+  postgres-dwh-volume: 
