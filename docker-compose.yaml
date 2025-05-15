@@ -14,6 +14,8 @@ services:
       - postgres-db-volume:/var/lib/postgresql/data
     ports:
       - "5435:5435"
+    networks:
+      - airflow-spark-network
 
   postgres-dwh:
     image: postgres:17.2
@@ -30,6 +32,8 @@ services:
       - postgres-dwh-volume:/var/lib/postgresql/data
     ports:
       - "5433:5432"
+    networks:
+      - airflow-spark-network
 
   redis:
     image: redis:latest
@@ -41,12 +45,17 @@ services:
     restart: always
     ports:
       - "6379:6379"
+    networks:
+      - airflow-spark-network
 
   airflow-webserver:
-    image: apache/airflow:2.10.5
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
     depends_on:
       - postgres
       - redis
+      - spark-master
     env_file:
       - ./config/airflow.env
     volumes:
@@ -66,9 +75,13 @@ services:
       timeout: 10s
       retries: 5
     restart: always
+    networks:
+      - airflow-spark-network
 
   airflow-scheduler:
-    image: apache/airflow:2.10.5
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
     depends_on:
       - airflow-webserver
     env_file:
@@ -83,9 +96,13 @@ services:
     command: >
       bash -c "pip install -r requirements.txt && airflow scheduler"
     restart: always
+    networks:
+      - airflow-spark-network
 
   airflow-worker:
-    image: apache/airflow:2.10.5
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
     depends_on:
       - airflow-scheduler
     env_file:
@@ -100,9 +117,13 @@ services:
     command: >
       bash -c "pip install -r requirements.txt && airflow celery worker"
     restart: always
+    networks:
+      - airflow-spark-network
 
   airflow-init:
-    image: apache/airflow:2.10.5
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
     depends_on:
       - postgres
     env_file:
@@ -117,7 +138,47 @@ services:
     command: >
       bash -c "pip install -r requirements.txt && airflow version"
     restart: always
+    networks:
+      - airflow-spark-network
+
+  spark-master:
+    image: bitnami/spark:3.5.2
+    environment:
+      - SPARK_MODE=master
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_IP=spark-master
+    ports:
+      - "8081:8080"
+      - "7077:7077"
+    volumes:
+      - ./data:/opt/airflow/data
+    restart: always
+    networks:
+      - airflow-spark-network
+
+  spark-worker:
+    image: bitnami/spark:3.5.2
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=1G
+      - SPARK_WORKER_CORES=1
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+    depends_on:
+      - spark-master
+    volumes:
+      - ./data:/opt/airflow/data
+    restart: always
+    networks:
+      - airflow-spark-network
 
 volumes:
   postgres-db-volume:
-  postgres-dwh-volume: 
+  postgres-dwh-volume:
+
+networks:
+  airflow-spark-network:
+    name: airflow-spark-network
+    driver: bridge 
